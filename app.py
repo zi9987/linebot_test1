@@ -97,7 +97,7 @@ def pay():
     order_id = str(uuid.uuid4())
 
     # 設定付款完成後的回調 URL
-    confirm_url = url_for('confirm', order_id=order_id, _external=True)
+    confirm_url = url_for('linepay_confirm', _external=True)
     cancel_url = url_for('cancel', _external=True)
 
     request_options = {
@@ -161,5 +161,6 @@ def cancel():
     return "您已取消付款"
 
 if __name__ == "__main__":
+    app.run(debug=True)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
