@@ -134,22 +134,27 @@ def pay():
         app.logger.error(traceback.format_exc())
         return "發生錯誤，請稍後再試"
 
-@app.route("/confirm", methods=['GET'])
-def confirm():
+@app.route("/linepay/confirm", methods=['GET'])
+def linepay_confirm():
     transaction_id = request.args.get('transactionId')
-    order_id = request.args.get('order_id')
+    if not transaction_id:
+        return "Transaction ID not found", 400
+
+    # 假設您在付款請求時保存了 order_id 與 user_id 的對應關係
+    order_id = request.args.get('orderId')
+    user_id = get_user_id_from_order(order_id)  # 根據您的邏輯獲取 user_id
+
+    # 呼叫 Confirm API
     amount = 100  # 與付款請求中的金額一致
     currency = 'TWD'  # 與付款請求中的貨幣一致
+    response = line_pay_api.confirm(transaction_id, amount, currency)
+    if response['returnCode'] == '0000':
+        # 付款成功，通知使用者
+        line_bot_api.push_message(user_id, TextSendMessage(text="付款成功，感謝您的購買！"))
+        return "Payment confirmed", 200
+    else:
+        return f"Payment confirmation failed: {response['returnMessage']}", 400
 
-    try:
-        response = line_pay_api.confirm(transaction_id, amount, currency)
-        if response['returnCode'] == '0000':
-            return "付款成功"
-        else:
-            return f"付款失敗：{response['returnMessage']}"
-    except Exception:
-        app.logger.error(traceback.format_exc())
-        return "發生錯誤，請稍後再試"
 
 @app.route("/cancel", methods=['GET'])
 def cancel():
