@@ -28,6 +28,13 @@ line_pay_api = LinePayApi(
     channel_secret=LINE_PAY_CHANNEL_SECRET,
     is_sandbox=IS_SANDBOX
 )
+def show_initial_options(reply_token):
+    options = [
+        QuickReplyButton(action=MessageAction(label="我要上傳筆記", text="我要上傳筆記")),
+        QuickReplyButton(action=MessageAction(label="我要取得筆記", text="我要取得筆記"))
+    ]
+    quick_reply = QuickReply(items=options)
+    line_bot_api.reply_message(reply_token, TextSendMessage(text="請選擇操作：", quick_reply=quick_reply))
 
 def GPT_response(text):
     # 呼叫 OpenAI API 獲取回應
