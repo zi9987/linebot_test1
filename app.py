@@ -124,7 +124,11 @@ def GPT_response(text):
 @app.route("/callback", methods=['POST'])
 def callback():
     # 獲取 X-Line-Signature 標頭值
-    signature = request.headers['X-Line-Signature']
+    signature = request.headers.get('X-Line-Signature')
+    if not signature:
+        app.logger.error("缺少 X-Line-Signature 標頭值")
+        abort(400)
+
     # 獲取請求主體內容
     body = request.get_data(as_text=True)
     app.logger.info("Request body: " + body)
@@ -132,24 +136,17 @@ def callback():
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        app.logger.error("無效的簽名錯誤")
         abort(400)
+    except Exception as e:
+        app.logger.error(f"處理 webhook 時發生異常：{str(e)}")
+        abort(500)
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    message_id = event.message.id
-    user_id = event.source.user_id
-    file_name = event.message.file_name
-    # 下載檔案
-    file_data = download_file(message_id)
-    # 儲存至資料庫
-    save_file_to_db(user_id, file_name, file_data)
-    # 回應使用者
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=f"您已成功上傳檔案：{file_name}")
-    )
     msg = event.message.text
+    user_id = event.source.user_id
     if msg == "購買筆記":
         # 觸發付款流程
         pay_url = url_for('pay', _external=True)
@@ -161,7 +158,8 @@ def handle_message(event):
         try:
             GPT_answer = GPT_response(msg)
             line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
-        except Exception:
+        except Exception as e:
+            app.logger.error(f"呼叫 GPT-3 回應時發生錯誤：{str(e)}")
             app.logger.error(traceback.format_exc())
             line_bot_api.reply_message(
                 event.reply_token,
@@ -222,7 +220,8 @@ def pay():
         response = line_pay_api.request(request_options)
         payment_url = response['info']['paymentUrl']['web']
         return redirect(payment_url)
-    except Exception:
+    except Exception as e:
+        app.logger.error(f"付款請求時發生錯誤：{str(e)}")
         app.logger.error(traceback.format_exc())
         return "發生錯誤，請稍後再試"
 
@@ -230,6 +229,7 @@ def pay():
 def linepay_confirm():
     transaction_id = request.args.get('transactionId')
     if not transaction_id:
+        app.logger.error("未找到 Transaction ID")
         return "Transaction ID not found", 400
 
     # 假設您在付款請求時保存了 order_id 與 user_id 的對應關係
@@ -239,19 +239,24 @@ def linepay_confirm():
     # 呼叫 Confirm API
     amount = 100  # 與付款請求中的金額一致
     currency = 'TWD'  # 與付款請求中的貨幣一致
-    response = line_pay_api.confirm(transaction_id, amount, currency)
-    if response['returnCode'] == '0000':
-        # 付款成功，通知使用者
-        line_bot_api.push_message(user_id, TextSendMessage(text="付款成功，感謝您的購買！"))
-        return "Payment confirmed", 200
-    else:
-        return f"Payment confirmation failed: {response['returnMessage']}", 400
+    try:
+        response = line_pay_api.confirm(transaction_id, amount, currency)
+        if response['returnCode'] == '0000':
+            # 付款成功，通知使用者
+            line_bot_api.push_message(user_id, TextSendMessage(text="付款成功，感謝您的購買！"))
+            return "Payment confirmed", 200
+        else:
+            app.logger.error(f"付款確認失敗：{response['returnMessage']}")
+            return f"Payment confirmation failed: {response['returnMessage']}", 400
+    except Exception as e:
+        app.logger.error(f"確認付款時發生錯誤：{str(e)}")
+        app.logger.error(traceback.format_exc())
+        return "付款確認失敗，請稍後再試", 500
 
 @app.route("/cancel", methods=['GET'])
 def cancel():
     return "您已取消付款"
 
 if __name__ == "__main__":
-    app.run(debug=True)
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=True)
