@@ -9,6 +9,7 @@ from linepay import LinePayApi
 import openai
 import psycopg2
 from psycopg2 import sql
+
 app = Flask(__name__)
 
 # 設定 LINE Bot 的 Channel Access Token 和 Channel Secret
@@ -29,7 +30,6 @@ line_pay_api = LinePayApi(
     channel_secret=LINE_PAY_CHANNEL_SECRET,
     is_sandbox=IS_SANDBOX
 )
-
 
 # 設定資料庫連線參數
 DB_NAME = 'EnoteSQL'
@@ -55,7 +55,6 @@ def create_table():
     cursor.close()
     conn.close()
 
-
 def get_db_connection():
     return psycopg2.connect(
         dbname=DB_NAME,
@@ -64,13 +63,52 @@ def get_db_connection():
         host=DB_HOST,
         port=DB_PORT
     )
+
 def download_file(message_id):
     message_content = line_bot_api.get_message_content(message_id)
     file_data = b''
     for chunk in message_content.iter_content():
         file_data += chunk
+    app.logger.info(f"下載的檔案大小：{len(file_data)} bytes")
     return file_data
-    
+
+def save_file_to_db(user_id, file_name, file_data):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        insert_query = '''
+        INSERT INTO user_files (user_id, file_name, file_data)
+        VALUES (%s, %s, %s);
+        '''
+        cursor.execute(insert_query, (user_id, file_name, file_data))
+        conn.commit()
+        app.logger.info(f"檔案 {file_name} 已成功儲存到資料庫，使用者 ID: {user_id}")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.error(f"儲存檔案失敗：{str(e)}")
+
+def check_file_in_db(user_id, file_name):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        check_query = '''
+        SELECT * FROM user_files WHERE user_id = %s AND file_name = %s;
+        '''
+        cursor.execute(check_query, (user_id, file_name))
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if result:
+            app.logger.info(f"檔案 {file_name} 已經存在於資料庫中。")
+            return True
+        else:
+            app.logger.warning(f"找不到檔案 {file_name} 在資料庫中。")
+            return False
+    except Exception as e:
+        app.logger.error(f"查詢資料庫時發生錯誤：{str(e)}")
+        return False
+
 def GPT_response(text):
     # 呼叫 OpenAI API 獲取回應
     response = openai.Completion.create(
@@ -150,7 +188,7 @@ def pay():
     currency = 'TWD'  # 貨幣
     order_id = str(uuid.uuid4())
 
-    # 設定付款完成後的回調 URL
+    # 設定付款完成後的回貝 URL
     confirm_url = url_for('linepay_confirm', _external=True)
     cancel_url = url_for('cancel', _external=True)
 
@@ -196,7 +234,7 @@ def linepay_confirm():
 
     # 假設您在付款請求時保存了 order_id 與 user_id 的對應關係
     order_id = request.args.get('orderId')
-    user_id = get_user_id_from_order(order_id)  # 根據您的邏輯獲取 user_id
+    user_id = get_user_id_from_order(order_id)  # 根據您的邏輯獲得 user_id
 
     # 呼叫 Confirm API
     amount = 100  # 與付款請求中的金額一致
@@ -208,7 +246,6 @@ def linepay_confirm():
         return "Payment confirmed", 200
     else:
         return f"Payment confirmation failed: {response['returnMessage']}", 400
-
 
 @app.route("/cancel", methods=['GET'])
 def cancel():
