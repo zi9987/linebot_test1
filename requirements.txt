@@ -3,3 +3,4 @@ flask
 openai < 1.0.0
 gunicorn
 line-pay
+psycopg2-binary
