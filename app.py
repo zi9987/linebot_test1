@@ -38,13 +38,23 @@ DB_PASSWORD = 'Zkl7NsVZOLvv6gqvT64XwO66qUF45sfD'
 DB_HOST = 'dpg-csqti4d2ng1s73bq5c50-a'
 DB_PORT = '5432'
 
-CREATE TABLE user_files (
-    id SERIAL PRIMARY KEY,
-    user_id VARCHAR(50),
-    file_name VARCHAR(255),
-    file_data BYTEA,
-    upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+def create_table():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    create_table_query = '''
+    CREATE TABLE IF NOT EXISTS user_files (
+        id SERIAL PRIMARY KEY,
+        user_id VARCHAR(50),
+        file_name VARCHAR(255),
+        file_data BYTEA,
+        upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    '''
+    cursor.execute(create_table_query)
+    conn.commit()
+    cursor.close()
+    conn.close()
+
 
 def get_db_connection():
     return psycopg2.connect(
