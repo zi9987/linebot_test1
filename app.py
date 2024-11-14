@@ -7,7 +7,8 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import TextSendMessage, MessageEvent, TextMessage, PostbackEvent, MemberJoinedEvent
 from linepay import LinePayApi
 import openai
-
+import psycopg2
+from psycopg2 import sql
 app = Flask(__name__)
 
 # 設定 LINE Bot 的 Channel Access Token 和 Channel Secret
@@ -28,14 +29,38 @@ line_pay_api = LinePayApi(
     channel_secret=LINE_PAY_CHANNEL_SECRET,
     is_sandbox=IS_SANDBOX
 )
-def show_initial_options(reply_token):
-    options = [
-        QuickReplyButton(action=MessageAction(label="我要上傳筆記", text="我要上傳筆記")),
-        QuickReplyButton(action=MessageAction(label="我要取得筆記", text="我要取得筆記"))
-    ]
-    quick_reply = QuickReply(items=options)
-    line_bot_api.reply_message(reply_token, TextSendMessage(text="請選擇操作：", quick_reply=quick_reply))
 
+
+# 設定資料庫連線參數
+DB_NAME = 'EnoteSQL'
+DB_USER = 'enotesql_user'
+DB_PASSWORD = 'Zkl7NsVZOLvv6gqvT64XwO66qUF45sfD'
+DB_HOST = 'dpg-csqti4d2ng1s73bq5c50-a'
+DB_PORT = '5432'
+
+CREATE TABLE user_files (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(50),
+    file_name VARCHAR(255),
+    file_data BYTEA,
+    upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+def get_db_connection():
+    return psycopg2.connect(
+        dbname=DB_NAME,
+        user=DB_USER,
+        password=DB_PASSWORD,
+        host=DB_HOST,
+        port=DB_PORT
+    )
+def download_file(message_id):
+    message_content = line_bot_api.get_message_content(message_id)
+    file_data = b''
+    for chunk in message_content.iter_content():
+        file_data += chunk
+    return file_data
+    
 def GPT_response(text):
     # 呼叫 OpenAI API 獲取回應
     response = openai.Completion.create(
@@ -64,6 +89,18 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
+    message_id = event.message.id
+    user_id = event.source.user_id
+    file_name = event.message.file_name
+    # 下載檔案
+    file_data = download_file(message_id)
+    # 儲存至資料庫
+    save_file_to_db(user_id, file_name, file_data)
+    # 回應使用者
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=f"您已成功上傳檔案：{file_name}")
+    )
     msg = event.message.text
     if msg == "購買筆記":
         # 觸發付款流程
