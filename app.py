@@ -120,7 +120,10 @@ def handle_media_message(event):
         return
 
     # 生成唯一的檔案名稱
-    file_name = f"{uuid.uuid4()}.{ext}"
+    if message_type == 'file':
+        file_name = event.message.file_name
+    else:
+        file_name = f"{uuid.uuid4()}.{ext}"
 
     # 儲存檔案到資料庫
     save_file_to_db(user_id, file_name, file_data)
