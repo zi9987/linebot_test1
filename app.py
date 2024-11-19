@@ -18,7 +18,7 @@ line_bot_api = LineBotApi(os.getenv('CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
 
 # 設定資料庫連線參數
-DB_NAME = 'dpg-csqti4d2ng1s73bq5c50-a'
+DB_NAME = 'enotesql'
 DB_USER = 'enotesql_user'
 DB_PASSWORD = 'Zkl7NsVZOLvv6gqvT64XwO66qUF45sfD'
 DB_HOST = 'dpg-csqti4d2ng1s73bq5c50-a'
