@@ -107,7 +107,7 @@ def handle_media_message(event):
         'image': 'jpg',
         'video': 'mp4',
         'audio': 'm4a',
-        'file': event.message.file_name.split('.')[-1]  # 取得上傳檔案的副檔名
+        'file': None  # 對於 FileMessage，稍後處理
     }.get(message_type, 'dat')
 
     # 下載檔案內容
@@ -119,10 +119,12 @@ def handle_media_message(event):
         )
         return
 
-    # 生成唯一的檔案名稱
+    # 生成檔案名稱
     if message_type == 'file':
+        # 對於 FileMessage，使用原始檔案名稱
         file_name = event.message.file_name
     else:
+        # 對於其他訊息類型，生成唯一的檔案名稱
         file_name = f"{uuid.uuid4()}.{ext}"
 
     # 儲存檔案到資料庫
@@ -134,7 +136,6 @@ def handle_media_message(event):
         event.reply_token,
         TextSendMessage(text=reply_text)
     )
-
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_id = event.source.user_id
