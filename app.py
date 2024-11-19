@@ -4,9 +4,10 @@ import traceback
 from flask import Flask, request, abort, redirect, url_for
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import TextSendMessage, MessageEvent, TextMessage, PostbackEvent, MemberJoinedEvent
-from linepay import LinePayApi
-import openai
+from linebot.models import (
+    TextSendMessage, MessageEvent, TextMessage,
+    ImageMessage, VideoMessage, AudioMessage, FileMessage
+)
 import psycopg2
 from psycopg2 import sql
 
@@ -15,21 +16,6 @@ app = Flask(__name__)
 # 設定 LINE Bot 的 Channel Access Token 和 Channel Secret
 line_bot_api = LineBotApi(os.getenv('CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
-
-# 設定 OpenAI API Key
-openai.api_key = os.getenv('OPENAI_API_KEY')
-
-# 設定 LINE Pay 的 Channel ID 和 Channel Secret
-LINE_PAY_CHANNEL_ID = os.getenv('LINE_PAY_CHANNEL_ID')
-LINE_PAY_CHANNEL_SECRET = os.getenv('LINE_PAY_CHANNEL_SECRET')
-IS_SANDBOX = True  # 使用 Sandbox 環境進行測試
-
-# 初始化 LINE Pay API 客戶端
-line_pay_api = LinePayApi(
-    channel_id=LINE_PAY_CHANNEL_ID,
-    channel_secret=LINE_PAY_CHANNEL_SECRET,
-    is_sandbox=IS_SANDBOX
-)
 
 # 設定資料庫連線參數
 DB_NAME = 'EnoteSQL'
@@ -65,12 +51,14 @@ def get_db_connection():
     )
 
 def download_file(message_id):
-    message_content = line_bot_api.get_message_content(message_id)
-    file_data = b''
-    for chunk in message_content.iter_content():
-        file_data += chunk
-    app.logger.info(f"下載的檔案大小：{len(file_data)} bytes")
-    return file_data
+    try:
+        message_content = line_bot_api.get_message_content(message_id)
+        file_data = b''.join(chunk for chunk in message_content.iter_content())
+        app.logger.info(f"下載的檔案大小：{len(file_data)} bytes")
+        return file_data
+    except Exception as e:
+        app.logger.error(f"下載檔案時發生錯誤：{str(e)}")
+        return None
 
 def save_file_to_db(user_id, file_name, file_data):
     try:
@@ -88,51 +76,16 @@ def save_file_to_db(user_id, file_name, file_data):
     except Exception as e:
         app.logger.error(f"儲存檔案失敗：{str(e)}")
 
-def check_file_in_db(user_id, file_name):
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        check_query = '''
-        SELECT * FROM user_files WHERE user_id = %s AND file_name = %s;
-        '''
-        cursor.execute(check_query, (user_id, file_name))
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        if result:
-            app.logger.info(f"檔案 {file_name} 已經存在於資料庫中。")
-            return True
-        else:
-            app.logger.warning(f"找不到檔案 {file_name} 在資料庫中。")
-            return False
-    except Exception as e:
-        app.logger.error(f"查詢資料庫時發生錯誤：{str(e)}")
-        return False
-
-def GPT_response(text):
-    # 呼叫 OpenAI API 獲取回應
-    response = openai.Completion.create(
-        model="gpt-3.5-turbo-instruct",
-        prompt=text,
-        temperature=0.5,
-        max_tokens=500
-    )
-    # 提取並處理回應文本
-    answer = response['choices'][0]['text'].strip()
-    return answer
-
 @app.route("/callback", methods=['POST'])
 def callback():
-    # 獲取 X-Line-Signature 標頭值
     signature = request.headers.get('X-Line-Signature')
     if not signature:
         app.logger.error("缺少 X-Line-Signature 標頭值")
         abort(400)
 
-    # 獲取請求主體內容
     body = request.get_data(as_text=True)
     app.logger.info("Request body: " + body)
-    # 處理 webhook 主體
+
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
@@ -143,120 +96,59 @@ def callback():
         abort(500)
     return 'OK'
 
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    msg = event.message.text
+@handler.add(MessageEvent, message=(ImageMessage, VideoMessage, AudioMessage, FileMessage))
+def handle_media_message(event):
     user_id = event.source.user_id
-    if msg == "購買筆記":
-        # 觸發付款流程
-        pay_url = url_for('pay', _external=True)
+    message_id = event.message.id
+    message_type = event.message.type
+
+    # 根據訊息類型設定檔案副檔名
+    ext = {
+        'image': 'jpg',
+        'video': 'mp4',
+        'audio': 'm4a',
+        'file': event.message.file_name.split('.')[-1]  # 取得上傳檔案的副檔名
+    }.get(message_type, 'dat')
+
+    # 下載檔案內容
+    file_data = download_file(message_id)
+    if file_data is None:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=f"請點擊以下連結進行付款：{pay_url}")
+            TextSendMessage(text="下載檔案時發生錯誤，請稍後再試。")
         )
+        return
+
+    # 生成唯一的檔案名稱
+    file_name = f"{uuid.uuid4()}.{ext}"
+
+    # 儲存檔案到資料庫
+    save_file_to_db(user_id, file_name, file_data)
+
+    # 回覆使用者
+    reply_text = f"已成功接收您的{message_type}檔案：{file_name}"
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_text)
+    )
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_text_message(event):
+    user_id = event.source.user_id
+    text = event.message.text
+
+    # 根據使用者輸入的文字進行相應處理
+    if text.lower() == 'hello':
+        reply_text = "您好！請上傳您想要儲存的檔案。"
     else:
-        try:
-            GPT_answer = GPT_response(msg)
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
-        except Exception as e:
-            app.logger.error(f"呼叫 GPT-3 回應時發生錯誤：{str(e)}")
-            app.logger.error(traceback.format_exc())
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage('發生錯誤，請稍後再試')
-            )
+        reply_text = f"您說了：{text}"
 
-@handler.add(PostbackEvent)
-def handle_postback(event):
-    app.logger.info(f"Postback data: {event.postback.data}")
-
-@handler.add(MemberJoinedEvent)
-def welcome(event):
-    uid = event.joined.members[0].user_id
-    gid = event.source.group_id
-    profile = line_bot_api.get_group_member_profile(gid, uid)
-    name = profile.display_name
-    message = TextSendMessage(text=f'{name}，歡迎加入！')
-    line_bot_api.reply_message(event.reply_token, message)
-
-@app.route("/pay", methods=['GET'])
-def pay():
-    product_name = "E-note 筆記"
-    amount = 100  # 金額
-    currency = 'TWD'  # 貨幣
-    order_id = str(uuid.uuid4())
-
-    # 設定付款完成後的回貝 URL
-    confirm_url = url_for('linepay_confirm', _external=True)
-    cancel_url = url_for('cancel', _external=True)
-
-    request_options = {
-        'amount': amount,
-        'currency': currency,
-        'orderId': order_id,
-        'packages': [
-            {
-                'id': 'package-1',
-                'amount': amount,
-                'name': product_name,
-                'products': [
-                    {
-                        'id': 'product-1',
-                        'name': product_name,
-                        'imageUrl': 'https://example.com/product.jpg',
-                        'quantity': 1,
-                        'price': amount
-                    }
-                ]
-            }
-        ],
-        'redirectUrls': {
-            'confirmUrl': confirm_url,
-            'cancelUrl': cancel_url
-        }
-    }
-
-    try:
-        response = line_pay_api.request(request_options)
-        payment_url = response['info']['paymentUrl']['web']
-        return redirect(payment_url)
-    except Exception as e:
-        app.logger.error(f"付款請求時發生錯誤：{str(e)}")
-        app.logger.error(traceback.format_exc())
-        return "發生錯誤，請稍後再試"
-
-@app.route("/linepay/confirm", methods=['GET'])
-def linepay_confirm():
-    transaction_id = request.args.get('transactionId')
-    if not transaction_id:
-        app.logger.error("未找到 Transaction ID")
-        return "Transaction ID not found", 400
-
-    # 假設您在付款請求時保存了 order_id 與 user_id 的對應關係
-    order_id = request.args.get('orderId')
-    user_id = get_user_id_from_order(order_id)  # 根據您的邏輯獲得 user_id
-
-    # 呼叫 Confirm API
-    amount = 100  # 與付款請求中的金額一致
-    currency = 'TWD'  # 與付款請求中的貨幣一致
-    try:
-        response = line_pay_api.confirm(transaction_id, amount, currency)
-        if response['returnCode'] == '0000':
-            # 付款成功，通知使用者
-            line_bot_api.push_message(user_id, TextSendMessage(text="付款成功，感謝您的購買！"))
-            return "Payment confirmed", 200
-        else:
-            app.logger.error(f"付款確認失敗：{response['returnMessage']}")
-            return f"Payment confirmation failed: {response['returnMessage']}", 400
-    except Exception as e:
-        app.logger.error(f"確認付款時發生錯誤：{str(e)}")
-        app.logger.error(traceback.format_exc())
-        return "付款確認失敗，請稍後再試", 500
-
-@app.route("/cancel", methods=['GET'])
-def cancel():
-    return "您已取消付款"
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_text)
+    )
 
 if __name__ == "__main__":
+    create_table()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
