@@ -48,31 +48,23 @@ def get_db_connection():
 
 def create_user_images_table():
     try:
-        conn = psycopg2.connect(
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=DB_PORT
-        )
-        cursor = conn.cursor()
-        create_table_query = '''
-        CREATE TABLE IF NOT EXISTS user_images (
-            id SERIAL PRIMARY KEY,
-            user_id VARCHAR(50),
-            image_name VARCHAR(255),
-            image_data BYTEA,
-            upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        '''
-        cursor.execute(create_table_query)
-        conn.commit()
-        cursor.close()
-        conn.close()
-        app.logger.info("Table 'user_images' is ready.")
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                create_table_query = '''
+                CREATE TABLE IF NOT EXISTS user_images (
+                    id SERIAL PRIMARY KEY,
+                    user_id VARCHAR(50) NOT NULL,
+                    image_name VARCHAR(255) NOT NULL,
+                    image_data BYTEA NOT NULL,
+                    upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    file_size INTEGER
+                );
+                '''
+                cursor.execute(create_table_query)
+                conn.commit()
+        print("Table 'user_images' is ready.")
     except Exception as e:
-        app.logger.error(f"An error occurred while creating the table: {e}")
-
+        print(f"An error occurred while creating the table: {e}")
 def get_db_connection():
     try:
         conn = psycopg2.connect(
@@ -98,34 +90,48 @@ def download_file(message_id):
         return None
 
 def save_file_to_db(user_id, file_name, file_data):
+    conn = get_db_connection()
+    if conn is None:
+        app.logger.error("Failed to connect to the database.")
+        return
     try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute('''
-                INSERT INTO user_images (user_id, image_name, image_data, file_size)
-                VALUES (%s, %s, %s, %s)
-                ''', (user_id, file_name, psycopg2.Binary(file_data), len(file_data)))
-                conn.commit()
-        app.logger.info(f"File '{file_name}' saved for user '{user_id}'")
-        return True
+        cursor = conn.cursor()
+        insert_query = '''
+        INSERT INTO user_images (user_id, image_name, image_data)
+        VALUES (%s, %s, %s);
+        '''
+        cursor.execute(insert_query, (user_id, file_name, psycopg2.Binary(file_data)))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info(f"File '{file_name}' saved to database for user '{user_id}'.")
     except Exception as e:
-        app.logger.error(f"File save error: {e}")
-        return False
-
+        app.logger.error(f"Error saving file to database: {str(e)}")
+        
 def get_latest_image_for_user(user_id):
+    conn = get_db_connection()
+    if conn is None:
+        return None, None
     try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute('''
-                SELECT image_name, image_data
-                FROM user_images
-                WHERE user_id = %s
-                ORDER BY upload_time DESC
-                LIMIT 1
-                ''', (user_id,))
-                return cursor.fetchone() or (None, None)
+        cursor = conn.cursor()
+        query = '''
+        SELECT image_name, image_data
+        FROM user_images
+        WHERE user_id = %s
+        ORDER BY upload_time DESC
+        LIMIT 1;
+        '''
+        cursor.execute(query, (user_id,))
+        record = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if record:
+            image_name, image_data = record
+            return image_data, image_name
+        else:
+            return None, None
     except Exception as e:
-        app.logger.error(f"Image retrieval error: {e}")
+        app.logger.error(f"Error retrieving image from database: {str(e)}")
         return None, None
 
 @app.route('/image/<int:image_id>')
