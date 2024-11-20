@@ -11,6 +11,7 @@ from linebot.models import (
 )
 import psycopg2
 from psycopg2 import sql
+from urllib.parse import urlparse
 
 app = Flask(__name__)
 
@@ -24,6 +25,26 @@ DB_USER = 'enotesql_user'
 DB_PASSWORD = 'Zkl7NsVZOLvv6gqvT64XwO66qUF45sfD'
 DB_HOST = 'dpg-csqti4d2ng1s73bq5c50-a'
 DB_PORT = '5432'
+DATABASE_URL = 'postgresql://enotesql_user:Zkl7NsVZOLvv6gqvT64XwO66qUF45sfD@dpg-csqti4d2ng1s73bq5c50-a/enotesql' 
+def get_db_connection():
+    db_url = os.getenv('DATABASE_URL')
+    if not db_url:
+        raise ValueError("DATABASE_URL environment variable not set")
+
+    result = urlparse(db_url)
+    username = result.username
+    password = result.password
+    database = result.path[1:]
+    hostname = result.hostname
+    port = result.port
+
+    return psycopg2.connect(
+        dbname=database,
+        user=username,
+        password=password,
+        host=hostname,
+        port=port
+    )
 
 def create_user_images_table():
     try:
