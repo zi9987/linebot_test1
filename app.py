@@ -98,48 +98,34 @@ def download_file(message_id):
         return None
 
 def save_file_to_db(user_id, file_name, file_data):
-    conn = get_db_connection()
-    if conn is None:
-        app.logger.error("Failed to connect to the database.")
-        return
     try:
-        cursor = conn.cursor()
-        insert_query = '''
-        INSERT INTO user_images (user_id, image_name, image_data)
-        VALUES (%s, %s, %s);
-        '''
-        cursor.execute(insert_query, (user_id, file_name, psycopg2.Binary(file_data)))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        app.logger.info(f"File '{file_name}' saved to database for user '{user_id}'.")
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('''
+                INSERT INTO user_images (user_id, image_name, image_data, file_size)
+                VALUES (%s, %s, %s, %s)
+                ''', (user_id, file_name, psycopg2.Binary(file_data), len(file_data)))
+                conn.commit()
+        app.logger.info(f"File '{file_name}' saved for user '{user_id}'")
+        return True
     except Exception as e:
-        app.logger.error(f"Error saving file to database: {str(e)}")
-        
+        app.logger.error(f"File save error: {e}")
+        return False
+
 def get_latest_image_for_user(user_id):
-    conn = get_db_connection()
-    if conn is None:
-        return None, None
     try:
-        cursor = conn.cursor()
-        query = '''
-        SELECT image_name, image_data
-        FROM user_images
-        WHERE user_id = %s
-        ORDER BY upload_time DESC
-        LIMIT 1;
-        '''
-        cursor.execute(query, (user_id,))
-        record = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        if record:
-            image_name, image_data = record
-            return image_data, image_name
-        else:
-            return None, None
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('''
+                SELECT image_name, image_data
+                FROM user_images
+                WHERE user_id = %s
+                ORDER BY upload_time DESC
+                LIMIT 1
+                ''', (user_id,))
+                return cursor.fetchone() or (None, None)
     except Exception as e:
-        app.logger.error(f"Error retrieving image from database: {str(e)}")
+        app.logger.error(f"Image retrieval error: {e}")
         return None, None
 
 @app.route('/image/<int:image_id>')
