@@ -177,17 +177,27 @@ def handle_media_message(event):
 @handler.add(MessageEvent, message=TextMessage)
 def handle_text_message(event):
     user_id = event.source.user_id
-    text = event.message.text
+    text = event.message.text.strip()
 
-    if text.lower() == 'hello':
-        reply_text = "Hello! Please upload the file you want to save."
+    if text == '傳送檔案':
+        # Retrieve the latest image for the user
+        image_data, image_name = get_latest_image_for_user(user_id)
+        if image_data:
+            # Send the image back to the user
+            image_message = ImageSendMessage(
+                original_content_url=f"{YOUR_SERVER_URL}/image/{image_name}",
+                preview_image_url=f"{YOUR_SERVER_URL}/image/{image_name}"
+            )
+            line_bot_api.reply_message(event.reply_token, image_message)
+        else:
+            # Inform the user that no image was found
+            reply_text = "您尚未上傳任何圖片。"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
     else:
-        reply_text = f"You said: {text}"
+        # Handle other text messages
+        reply_text = f"您說了：{text}"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=reply_text)
-    )
 
 if __name__ == "__main__":
     create_user_images_table()
