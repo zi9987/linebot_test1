@@ -61,11 +61,7 @@ def create_user_images_table():
         print(f"An error occurred while creating the table: {e}")
 
 
-from flask import Flask, request, redirect, url_for
-import psycopg2
-from psycopg2 import sql
 
-app = Flask(__name__)
 
 
 
@@ -77,6 +73,15 @@ def get_db_connection():
         host=DB_HOST,
         port=DB_PORT
     )
+ def download_file(message_id):
+    try:
+        message_content = line_bot_api.get_message_content(message_id)
+        file_data = b''.join(chunk for chunk in message_content.iter_content())
+        app.logger.info(f"Downloaded file size: {len(file_data)} bytes")
+        return file_data
+    except Exception as e:
+        app.logger.error(f"Error downloading file: {str(e)}")
+        return None
 
 @app.route('/upload', methods=['POST'])
 def upload_image():
