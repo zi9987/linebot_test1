@@ -23,23 +23,51 @@ DB_USER = 'enotesql_user'
 DB_PASSWORD = 'Zkl7NsVZOLvv6gqvT64XwO66qUF45sfD'
 DB_HOST = 'dpg-csqti4d2ng1s73bq5c50-a'
 DB_PORT = '5432'
+import psycopg2
+from psycopg2 import sql
 
-def create_table():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    create_table_query = '''
-    CREATE TABLE IF NOT EXISTS user_files (
-        id SERIAL PRIMARY KEY,
-        user_id VARCHAR(50),
-        file_name VARCHAR(255),
-        file_data BYTEA,
-        upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    '''
-    cursor.execute(create_table_query)
-    conn.commit()
-    cursor.close()
-    conn.close()
+def create_user_images_table():
+    try:
+        # Establish a connection to the database
+        conn = psycopg2.connect(
+            dbname='enotesql',
+            user='enotesql_user',
+            password='Zkl7NsVZOLvv6gqvT64XwO66qUF45sfD',
+            host='dpg-csqti4d2ng1s73bq5c50-a',
+            port='5432'
+        )
+        cursor = conn.cursor()
+        
+        # Define the CREATE TABLE statement
+        create_table_query = '''
+        CREATE TABLE IF NOT EXISTS user_images (
+            id SERIAL PRIMARY KEY,
+            user_id VARCHAR(50),
+            image_name VARCHAR(255),
+            image_data BYTEA,
+            upload_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        '''
+        
+        # Execute the statement
+        cursor.execute(create_table_query)
+        conn.commit()
+        
+        # Close the cursor and connection
+        cursor.close()
+        conn.close()
+        print("Table 'user_images' is ready.")
+    except Exception as e:
+        print(f"An error occurred while creating the table: {e}")
+
+
+from flask import Flask, request, redirect, url_for
+import psycopg2
+from psycopg2 import sql
+
+app = Flask(__name__)
+
+
 
 def get_db_connection():
     return psycopg2.connect(
@@ -50,33 +78,56 @@ def get_db_connection():
         port=DB_PORT
     )
 
-def download_file(message_id):
-    try:
-        message_content = line_bot_api.get_message_content(message_id)
-        file_data = b''.join(chunk for chunk in message_content.iter_content())
-        app.logger.info(f"下載的檔案大小：{len(file_data)} bytes")
-        return file_data
-    except Exception as e:
-        app.logger.error(f"下載檔案時發生錯誤：{str(e)}")
-        return None
+@app.route('/upload', methods=['POST'])
+def upload_image():
+    if 'file' not in request.files:
+        return 'No file part', 400
+    file = request.files['file']
+    if file.filename == '':
+        return 'No selected file', 400
+    if file:
+        user_id = request.form.get('user_id')  # Assuming user_id is sent in the form data
+        image_name = file.filename
+        image_data = file.read()
+        save_image_to_db(user_id, image_name, image_data)
+        return 'Image successfully uploaded', 200
 
-def save_file_to_db(user_id, file_name, file_data):
+def save_image_to_db(user_id, image_name, image_data):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         insert_query = '''
-        INSERT INTO user_files (user_id, file_name, file_data)
+        INSERT INTO user_images (user_id, image_name, image_data)
         VALUES (%s, %s, %s);
         '''
-        # Use psycopg2.Binary to adapt the binary data for insertion
-        cursor.execute(insert_query, (user_id, file_name, psycopg2.Binary(file_data)))
+        cursor.execute(insert_query, (user_id, image_name, psycopg2.Binary(image_data)))
         conn.commit()
-        app.logger.info(f"File {file_name} has been successfully saved to the database for user ID: {user_id}")
         cursor.close()
         conn.close()
     except Exception as e:
-        app.logger.error(f"Failed to save file: {str(e)}")
-
+        print(f"Error saving image to database: {e}")
+@app.route('/image/<int:image_id>')
+def get_image(image_id):
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT image_name, image_data FROM user_images WHERE id = %s;', (image_id,))
+        record = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if record:
+            image_name, image_data = record
+            return send_file(
+                io.BytesIO(image_data),
+                mimetype='image/jpeg',  # Adjust MIME type as needed
+                as_attachment=False,
+                download_name=image_name
+            )
+        else:
+            return 'Image not found', 404
+    except Exception as e:
+        print(f"Error retrieving image from database: {e}")
+        return 'Internal server error', 500
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
@@ -154,6 +205,5 @@ def handle_text_message(event):
     )
 
 if __name__ == "__main__":
-    create_table()
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    create_user_images_table()
+    app.run(host='0.0.0.0', port=5000, debug=True)
