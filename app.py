@@ -68,13 +68,14 @@ def save_file_to_db(user_id, file_name, file_data):
         INSERT INTO user_files (user_id, file_name, file_data)
         VALUES (%s, %s, %s);
         '''
-        cursor.execute(insert_query, (user_id, file_name, file_data))
+        # Use psycopg2.Binary to adapt the binary data for insertion
+        cursor.execute(insert_query, (user_id, file_name, psycopg2.Binary(file_data)))
         conn.commit()
-        app.logger.info(f"檔案 {file_name} 已成功儲存到資料庫，使用者 ID: {user_id}")
+        app.logger.info(f"File {file_name} has been successfully saved to the database for user ID: {user_id}")
         cursor.close()
         conn.close()
     except Exception as e:
-        app.logger.error(f"儲存檔案失敗：{str(e)}")
+        app.logger.error(f"Failed to save file: {str(e)}")
 
 @app.route("/callback", methods=['POST'])
 def callback():
