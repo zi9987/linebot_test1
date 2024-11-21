@@ -203,7 +203,7 @@ def pay():
                     {
                         'id': 'product-1',
                         'name': product_name,
-                        'imageUrl': 'https://example.com/product.jpg',
+                        'imageUrl': 'https://ibb.co/0ZvVd81',
                         'quantity': 1,
                         'price': amount
                     }
